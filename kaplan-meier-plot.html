@@ -1,0 +1,240 @@
+<!DOCTYPE HTML>
+<html>
+    <head>
+        <title>Kaplan-Meier Plot</title>
+        <script src="http://d3js.org/d3.v3.min.js"></script>
+        <script src="http://d3js.org/queue.v1.min.js"></script>
+        <style>
+            body { 
+                font: 12px Arial;
+            }
+
+            path {
+                stroke: steelblue;
+                stroke-width: 1;
+                fill: none;
+            }
+            
+            .axis {
+              shape-rendering: crispEdges;
+            }
+
+            .x.axis line {
+              stroke: lightgrey;
+            }
+
+            .x.axis .minor {
+              stroke-opacity: .5;
+            }
+
+            .x.axis path {
+                stroke: #000;
+            }
+
+            .y.axis line, .y.axis path {
+              fill: none;
+              stroke: #000;
+            }
+
+            div.tooltip {   
+                position: absolute;         
+                text-align: center;         
+                width: 60px;                    
+                height: 18px;                   
+                padding: 2px;               
+                font: 12px sans-serif;      
+                background: lightsteelblue; 
+                border: 0px;        
+                border-radius: 8px;         
+                pointer-events: none;           
+            }
+        </style>
+    </head>
+
+<div id="graph" class="aGraph" style="position:absolute;top:0px;left:0; float:left;"></div>
+    <script>
+
+    // set some graph constants
+    var xAxisTicks = 8;
+    var yAxisTicks = 10;
+    var censorRectXOffset = -1;
+    var censorRectYOffset = -3.5;
+    var censorRectWidth = 1;
+    var censorRectHeight = 8;
+
+    // the maximum number of days displayed on the graph
+    var maxTimeInDays = 0;
+
+    // Set margins
+    var margin = {top: 100, right: 100, bottom: 100, left: 100},
+        width = 800 - margin.left - margin.right,
+        height = 800 - margin.top - margin.bottom;
+
+    // Define the axis scales
+    var x = d3.scale.linear()
+        .domain([0, 100])
+        .range([0, width]);
+
+    var y = d3.scale.linear()
+        .domain([0, 1])
+        .range([height, 0]);
+
+    // Define the axes
+    var xAxis = d3.svg.axis()
+        .scale(x)
+        .orient("bottom")
+        .ticks(xAxisTicks);
+
+    var yAxis = d3.svg.axis()
+        .scale(y)
+        .orient("left")
+        .ticks(yAxisTicks);
+
+    // Define the line
+    var previousValidValue;
+    var valueline = d3.svg.line()
+        .x((d) => { 
+            if (d.Time != '') {
+                return x(d.Time);
+            }
+        })
+        .y((d, i) => { 
+            if (d.Time != '') {
+                if (d.Probablility != '') {
+                    previousValidValue = d.Probablility;
+                    return y(d.Probablility); 
+                } else {
+                    return y(previousValidValue);
+                }
+            }
+        })
+        .interpolate("step-before");
+
+    // used for tooltips
+    var div = d3.select("body").append("div")   
+        .attr("class", "tooltip")               
+        .style("opacity", 0);
+
+    // Adds the svg canvas
+    var svg = d3.select("body")
+        .append("svg")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom)
+        .append("g")
+            .attr("transform", 
+                  "translate(" + margin.left + "," + margin.top + ")");
+
+    // Add the X axis
+    svg.append("g")
+        .attr("class", "x axis")
+        .attr("transform", "translate(0," + height + ")")
+        .call(xAxis);
+
+    // X axis label
+    svg.append("text")      
+        .attr("x", width/2 )
+        .attr("y",  height + 40 )
+        .style("text-anchor", "middle")
+        .text("Time");
+
+    // Add the Y axis
+    svg.append("g")
+        .attr("class", "y axis")
+        .call(yAxis);
+
+    // Y axis label
+    svg.append("text")
+        .attr("transform", "rotate(-90)")
+        .attr("y", -80)
+        .attr("x", -(height / 2))
+        .attr("dy", "1em")
+        .style("text-anchor", "middle")
+        .text("Probability of Survival");
+
+    var container = svg.append("g");
+
+    // refreshes graph axes when domains are updated
+    function refresh() {
+        svg.select(".x.axis").call(xAxis);
+        svg.select(".y.axis").call(yAxis);
+    }
+
+    // parses a data file to plot a line
+    function parseFile(filename){
+        queue()
+            .defer(d3.csv, filename)
+            .await(plotLine);
+    }    
+
+    parseFile("http://localhost:8000/test0.csv");
+    parseFile("http://localhost:8000/test1.csv");
+
+    // y domain is probability, so static between 0 and 1
+    y.domain([0, 1]);
+
+    function plotLine(err, data) {
+        // get time in days of the data, and if it's bigger than the max, make it the max
+        var timeInDays = d3.max(data, (d) => { return parseInt(d.Time); });
+        if (timeInDays > maxTimeInDays) {
+            maxTimeInDays = timeInDays;
+        }
+        
+        // set x domain
+        x.domain([0, maxTimeInDays]);
+
+        refresh();
+
+        // draw the path with a random color
+        svg.append("path")
+            .attr("class", "line")
+            .style("stroke", function() {
+                return "hsl(" + Math.random() * 360 + ",100%,50%)";
+            })
+            .attr("d", valueline(data));
+
+        // draw censor points
+        addCensorPoints(data);
+    }
+
+    // add censor points to a data line
+    function addCensorPoints(data) {
+        svg.selectAll("rect.black")
+           .data(data)
+           .enter()
+           .append("rect")
+           .attr("fill", "black")
+           .attr("x", (d) => {
+                return x(d.Time) + censorRectXOffset;
+           })
+           .attr("y", (d) => {
+                if (d.Probablility != '') {
+                    previousValidValue = y(d.Probablility) + censorRectYOffset;
+                    return previousValidValue; 
+                } else {
+                    return previousValidValue;
+                }
+            })
+            .attr("width", (d) => { if (d.Probablility != '' || d.Time == '') { return 0; }
+                else { return censorRectWidth; }
+            })
+            .attr("height", (d) => { if (d.Probablility != '' || d.Time == '') { return 0; }
+                else { return censorRectHeight; } 
+            })
+
+            .on("mouseover", function(d) {      
+                div.transition()
+                    .duration(100)
+                    .style("opacity", .9);      
+                div .html("Day " + parseInt(d.Time))  
+                    .style("left", (d3.event.pageX) + "px")     
+                    .style("top", (d3.event.pageY - 28) + "px");    
+            })                  
+            .on("mouseout", function(d) {       
+                div.transition()        
+                    .duration(500)      
+                    .style("opacity", 0);   
+            });
+    }
+                    
+    </script>
+</html>
